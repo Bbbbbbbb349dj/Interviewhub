@@ -30,31 +30,36 @@ export function useSpeechRecognition() {
     interimSegmentsRef.current = new Map();
     setLiveText('');
     rec.onresult = (e) => {
-      // Web Speech API can emit the same final result more than once, especially
-      // with continuous recognition on Chromium/Android. Keep results by their
-      // result index instead of concatenating every event. This prevents output
-      // such as "hi hi hi hi" when the user only said "hi" once.
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const transcript = e.results[i][0]?.transcript?.trim() || '';
+      // Chromium/Android can report the same utterance as multiple result
+      // segments (for example: "hello", "hello"). Rebuild from the browser's
+      // current result list and suppress exact duplicate adjacent segments.
+      const finalParts = [];
+      const interimParts = [];
+      let previousFinal = '';
+      let previousInterim = '';
+
+      for (let i = 0; i < e.results.length; i++) {
+        const result = e.results[i];
+        const transcript = result[0]?.transcript?.trim() || '';
         if (!transcript) continue;
 
-        if (e.results[i].isFinal) {
-          finalSegmentsRef.current.set(i, transcript);
-          interimSegmentsRef.current.delete(i);
+        if (result.isFinal) {
+          const normalized = transcript.toLowerCase().replace(/\s+/g, ' ');
+          if (normalized !== previousFinal) {
+            finalParts.push(transcript);
+            previousFinal = normalized;
+          }
         } else {
-          interimSegmentsRef.current.set(i, transcript);
+          const normalized = transcript.toLowerCase().replace(/\s+/g, ' ');
+          if (normalized !== previousInterim) {
+            interimParts.push(transcript);
+            previousInterim = normalized;
+          }
         }
       }
 
-      const finalText = Array.from(finalSegmentsRef.current.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([, text]) => text)
-        .join(' ');
-      const interimText = Array.from(interimSegmentsRef.current.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([, text]) => text)
-        .join(' ');
-
+      const finalText = finalParts.join(' ');
+      const interimText = interimParts.join(' ');
       setLiveText(`${finalText} ${interimText}`.trim());
     };
     rec.onerror = (e) => {
