@@ -7,7 +7,8 @@ export function useSpeechRecognition() {
   const [liveText, setLiveText] = useState('');
   const [error, setError] = useState('');
   const recRef = useRef(null);
-  const finalRef = useRef('');
+  const finalSegmentsRef = useRef(new Map());
+  const interimSegmentsRef = useRef(new Map());
 
   const stop = useCallback(() => {
     try { recRef.current?.stop(); } catch { /* already stopped */ }
@@ -25,15 +26,36 @@ export function useSpeechRecognition() {
     rec.interimResults = true;
     rec.continuous = true;
     recRef.current = rec;
-    finalRef.current = '';
+    finalSegmentsRef.current = new Map();
+    interimSegmentsRef.current = new Map();
     setLiveText('');
     rec.onresult = (e) => {
-      let interim = '';
+      // Web Speech API can emit the same final result more than once, especially
+      // with continuous recognition on Chromium/Android. Keep results by their
+      // result index instead of concatenating every event. This prevents output
+      // such as "hi hi hi hi" when the user only said "hi" once.
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalRef.current += e.results[i][0].transcript + ' ';
-        else interim += e.results[i][0].transcript;
+        const transcript = e.results[i][0]?.transcript?.trim() || '';
+        if (!transcript) continue;
+
+        if (e.results[i].isFinal) {
+          finalSegmentsRef.current.set(i, transcript);
+          interimSegmentsRef.current.delete(i);
+        } else {
+          interimSegmentsRef.current.set(i, transcript);
+        }
       }
-      setLiveText((finalRef.current + interim).trim());
+
+      const finalText = Array.from(finalSegmentsRef.current.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, text]) => text)
+        .join(' ');
+      const interimText = Array.from(interimSegmentsRef.current.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, text]) => text)
+        .join(' ');
+
+      setLiveText(`${finalText} ${interimText}`.trim());
     };
     rec.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
