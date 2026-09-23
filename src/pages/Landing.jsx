@@ -516,14 +516,34 @@ function CommShowcase({ startTo }) {
     recRef.current = rec;
     setTranscript(''); setMetrics(null);
     startRef.current = Date.now();
-    let finalText = '';
     rec.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
-        else interim += e.results[i][0].transcript;
+      // Some Chromium/Android speech implementations can expose the same
+      // utterance in more than one result segment. Rebuild the current list
+      // and suppress exact duplicate adjacent segments.
+      const finalParts = [];
+      const interimParts = [];
+      let previousFinal = '';
+      let previousInterim = '';
+
+      for (let i = 0; i < e.results.length; i++) {
+        const result = e.results[i];
+        const text = result[0]?.transcript?.trim() || '';
+        if (!text) continue;
+        const normalized = text.toLowerCase().replace(/\s+/g, ' ');
+
+        if (result.isFinal) {
+          if (normalized !== previousFinal) {
+            finalParts.push(text);
+            previousFinal = normalized;
+          }
+        } else if (normalized !== previousInterim) {
+          interimParts.push(text);
+          previousInterim = normalized;
+        }
       }
-      setTranscript(finalText + interim);
+
+      finalText = finalParts.join(' ');
+      setTranscript(`${finalText} ${interimParts.join(' ')}`.trim());
     };
     rec.onerror = () => setListening(false);
     rec.onend = () => {
